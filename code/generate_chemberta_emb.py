@@ -5,16 +5,12 @@ from tqdm import tqdm
 import pickle
 import os
 
-#استيراد أدوات HuggingFace
-#AutoTokenizer → يحول الـ SMILES إلى Tokens يفهمها النموذج.
-#AutoModel → يحمل نموذج ChemBERTa نفسه.
 def generate_chemberta_embeddings(input_csv, output_pkl):
     # 1. إعداد النموذج (استخدام نسخة ChemBERTa-768 المفتوحة)
     model_name = "seyonec/ChemBERTa-zinc-base-v1"
-    tokenizer = AutoTokenizer.from_pretrained(model_name)#تحميل الـ Tokenizer.
-    model = AutoModel.from_pretrained(model_name) #تحميل أوزان ChemBERTa
-    model.eval()  #وضع النموذج في وضع التقييم Evaluation Mode.
-    # لا يوجد تدريب ولا تحديث لاوزان فقط استخراج ميزات 
+    tokenizer = AutoTokenizer.from_pretrained(model_name)
+    model = AutoModel.from_pretrained(model_name)
+    model.eval()
 
     # 2. قراءة ملف SMILES
     df = pd.read_csv(input_csv)
@@ -22,24 +18,21 @@ def generate_chemberta_embeddings(input_csv, output_pkl):
     if 'SMILES' not in df.columns:
         raise ValueError("الملف يجب أن يحتوي على عمود باسم SMILES")
 
-    embeddings_dict = {} # انشاء مكان حفظ النتائج 
+    embeddings_dict = {}
 
     print("جاري تحويل الـ SMILES إلى إيمبدنج...")
-    with th.no_grad(): # ايقاف حساب ال Gradients بما اننا لا ندرب النموذج لتوفير وقت وذاكره 
-        for index, row in tqdm(df.iterrows(), total=len(df)): #المرور على جميع الأدوية
+    with th.no_grad():
+        for index, row in tqdm(df.iterrows(), total=len(df)):
             smiles = str(row['SMILES'])
             drug_id = row['ID'] # نستخدم الـ ID كـ Key
             
             # تحويل النص إلى Tokens
-            #تتحول السمايل الى :tensor([[15,15,23]])   مثلا 
-            inputs = tokenizer(smiles, return_tensors="pt", padding=True, truncation=True, max_length=512)#return_tensors="pt"  إرجاع النتيجة كـ PyTorch Tensor.
+            inputs = tokenizer(smiles, return_tensors="pt", padding=True, truncation=True, max_length=512)
             # استخراج الميزات من النموذج
-            #لكل توكنيكون متجه 768 رقم 
             outputs = model(**inputs)
             # نأخذ المتوسط (Mean Pooling) لتمثيل الجزيء بالكامل في ناقل واحد
-           #يحسب المتوسط لكل رقم ) مجموعهم على عددهم
             emb = outputs.last_hidden_state.mean(dim=1).squeeze().numpy()
-            # يربط الايمبدنج بالID
+            
             embeddings_dict[drug_id] = emb
 
     # 3. حفظ النتيجة في مجلد feat
@@ -50,5 +43,5 @@ def generate_chemberta_embeddings(input_csv, output_pkl):
     print(f"تم بنجاح! الملف محفوظ في: {output_pkl}")
 
 if __name__ == "__main__":
-    #   المسار  للملفات
+    # تأكد من المسار الصحيح لملفك
     generate_chemberta_embeddings('../data/Cdataset/drug.csv', '../feat/Cdataset/ChemBERTa_drug_emb.pkl')
