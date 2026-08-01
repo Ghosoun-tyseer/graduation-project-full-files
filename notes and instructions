@@ -1,1 +1,75 @@
+1. The **Feat** folder contains only the embedding files for **Morgan** and **ChemBERT**, 
+which are the embeddings I worked on. The remaining original embeddings from the baseline 
+are available through the GitHub repository linked in the paper, labeled **"baseline link"**
+in this repository.
+
+Note :
+
+To run the code successfully, the project directory structure should remain exactly
+as it is in my repository. There should be a main project folder containing a subfolder 
+named `Codes`.
+
+Before running any scripts, make sure your terminal is inside the `Codes` directory.
+You can navigate to it using:
+"cd Codes" from terminal
+
+Once you are inside the `Codes` directory, you can run the desired scripts as described above.
+
+1. To run the baseline from the terminal, use:
+python main.py
+and pass any required parameters as defined in the `args.py` file. For example,
+use `-ft` to specify the feature type, such as `BERT`, `LLM`, `Morgan`, or `ChemBERTa`. 
+Other available settings can also be configured through the parameters listed in `args.py`.
+
+
+2. To run the **GAT** model from the terminal, use:
+python main_gat_final.py
+The required parameters are passed in the same way as for the baseline model.
+All GAT-specific parameters are defined in the `args_gat.py` file.
+
+
+3. To run the code in the **Hidden Link** directory, use either:
+python run_hidden_gat.py
+or
+python run_hidden_gcn.py
+
+Parameters can be passed from the terminal in the same way as before,
+since this experiment follows the previous setup with the only difference being the link-hiding mechanism we discussed.
+In addition, two extra parameters are available:
+* `--hidden_ratio`: Specifies the proportion of links to hide. The default value is `0.10`.
+* `--threshold`: Specifies the decision threshold used to determine whether a relationship is considered to exist or not. The default value is `0.5`.
+
+
+4. To run the **Candidates Sorted** script, which sorts the results from highest to lowest
+to facilitate selecting the top-ranked results for further experiments and analysis,
+follow these steps:
+
+First, navigate back to the main project directory using:
+cd ..
+
+if you are currently inside the `Codes` folder or any other subdirectory.
+
+Then, enter the `script` directory using:
+
+cd script
+
+After entering the `script` folder, you can run the script.
+
+Second, To sort any results, run the script from the terminal using:
+
+python all_candidate_sorted.py --result ../result/filename/...... write full path
+
+where `filename` is the name of the file containing the desired results.
+
+The script reads the specified result file and generates a sorted output in `result.csv`.
+
+**Note:** This script is currently configured only for the **Cdataset**, as its path is fixed inside the code.
+To use another dataset, simply replace the dataset name in **line 29** of the script.
+
+
+
+
+
+
+
 
