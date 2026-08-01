@@ -1,4 +1,19 @@
+"""
+model_gat.py
+============
 
+Improved heterogeneous GAT model for drug-disease association prediction.
+
+Main improvements:
+- Proper heterogeneous GAT with relation-specific attention
+- LayerNorm instead of BatchNorm (more stable for small biomedical graphs)
+- Separate normalization per node type
+- Residual connections
+- Multi-head attention
+- Layer-wise semantic attention
+- Safer decoder regularization
+- Stronger anti-overfitting defaults
+"""
 
 import torch
 import torch.nn as nn

@@ -1,3 +1,65 @@
+"""
+main_gat.py
+===========
+Training script for the GAT-based drug-disease association prediction model.
+
+KEY LEAKAGE ANALYSIS & MITIGATIONS
+====================================
+
+--- LEAKAGE RISK 1 (HIGH): Similarity matrix construction uses ALL data ---
+    In load_data.py, dr_sim and di_sim are computed from the FULL drug/disease
+    similarity matrices BEFORE the train/test split.  This means that the
+    similarity between a test drug and all its known associated diseases is
+    embedded in the graph structure used at training time.
+
+    Specifically:
+      • The dr_dr graph edges are derived from dr_sim (Jaccard/Gaussian kernel
+        over drug-disease associations) — which includes test associations.
+      • di_di edges are derived from di_sim — same issue.
+      • When test drug-disease edges are removed from the graph, the NODES
+        still carry similarity features computed using test information.
+
+    Severity: HIGH for association-based similarity (Gaussian kernel computed
+    from the DDA matrix itself); MODERATE for chemical/sequence similarity
+    (those do not use DDA labels).
+
+    Mitigation applied here:
+      • We add a flag `args.leak_safe_mode`. When True, we recompute the
+        similarity matrices after masking out test-set associations before
+        building the graph for each fold.  This is only feasible when
+        similarity is derived from the DDA matrix (Cdataset/Bdataset style).
+      • For chemical (Morgan/ChemBERTa) and sequence (BERT) similarities this
+        risk is lower because those are label-independent.
+
+--- LEAKAGE RISK 2 (MEDIUM): LLM embeddings and BERT features ---
+    LLM/BERT embeddings are computed OFFLINE from drug names/SMILES/disease
+    descriptions.  They are label-independent → no direct leakage.
+    However, if the embeddings were fine-tuned on any dataset that includes
+    the test associations, indirect leakage is possible.
+    Mitigation: document the embedding source clearly; avoid fine-tuning
+    embeddings on association labels within a fold.
+
+--- LEAKAGE RISK 3 (LOW-MEDIUM): k-NN graph construction threshold (top-15) ---
+    The top-15 threshold is applied globally.  A drug that has more known
+    associations will naturally appear more similar to other associated drugs
+    in the Gaussian-kernel similarity matrix, making it easier to predict.
+    This inflates AUC for densely-annotated nodes.
+    Mitigation: stratified splitting (implemented below) ensures the fold
+    test set represents the full spectrum of node connectivity.
+
+--- LEAKAGE RISK 4 (LOW): Negative sampling ---
+    Negatives are drawn from all zero entries of the DDA matrix.  Some of
+    those zeros are "unknown" rather than "confirmed negative".  This is a
+    standard assumption in the field but introduces optimistic evaluation.
+    Mitigation: flag this in reported results; consider PU-learning baselines.
+
+EVALUATION PROTOCOL IMPROVEMENTS OVER ORIGINAL:
+    1. Validation split within the training fold (10 % of training data).
+    2. Early stopping on validation AUC (not validation loss alone).
+    3. Gradient clipping to stabilise GAT training.
+    4. Model checkpoint saved per fold; best model used for test prediction.
+    5. Separate validation AUC logged every epoch.
+"""
 
 import os
 import logging
@@ -165,8 +227,6 @@ def train():
 
     fold        = 1
     pred_result = np.zeros(df.shape)
-
-
 
     # ── k-Fold loop ───────────────────────────────────────────────────────────
     for (tr_pos_idx, te_pos_idx), (tr_neg_idx, te_neg_idx) in zip(
@@ -354,10 +414,6 @@ def train():
         )
 
         fold += 1
-   
-    print("df shape =", df.shape)
-    print("pred_result shape =", pred_result.shape)
-    print("flatten size =", pred_result.size)
 
     # ── Overall evaluation ────────────────────────────────────────────────────
     label_np = th.tensor(df).float().numpy()

@@ -73,11 +73,8 @@ def load_dataset(args , exclude_dr_di_edges=None):
     dr_feat_init = np.hstack((dr_sim, np.zeros((g.num_nodes('drug'), g.num_nodes('disease')))))
     di_feat_init = np.hstack((np.zeros((g.num_nodes('disease'), g.num_nodes('drug'))), di_sim))
    
-#hidden features=node representation=h 
-#تتخزن الميزات مع النود 
-   #تخزين هذه البيانات في المتغير h يسمح لنموذج الـ GNN
-   #  في الخطوات التالية بالبدء بعملية الـ Message Passing، 
-   # حيث تنتقل ميزات الأدوية وتتشابك مع ميزات الأمراض عبر الروابط التي بنيناها."
+
+   #تخزين هذه البيانات في المتغير h يسمح لنموذج الـ GNN في الخطوات التالية بالبدء بعملية الـ Message Passing، حيث تنتقل ميزات الأدوية وتتشابك مع ميزات الأمراض عبر الروابط التي بنيناها."
     g.nodes['drug'].data['h'] = th.from_numpy(dr_feat_init).to(th.float32)
     g.nodes['disease'].data['h'] = th.from_numpy(di_feat_init).to(th.float32)
 
@@ -96,8 +93,7 @@ def load_dataset(args , exclude_dr_di_edges=None):
             dr_emb_dict = pickle.load(f)
             
         # ترتيب الأدوية لضمان تطابق المصفوفة مع نود الجراف
-        #يضمن أن أول دواء في المصفوفة هو نفسه الدواء رقم 0 في الجراف،
-        #  لتجنب خلط البيانات.
+        #يضمن أن أول دواء في المصفوفة هو نفسه الدواء رقم 0 في الجراف، لتجنب خلط البيانات.
         dr_feat_emb = th.tensor([dr_emb_dict[i] for i in sorted(dr_emb_dict.keys())]).to(th.float32)
         
         # للأمراض نستخدم BERT لعدم وجود SMILES
@@ -165,8 +161,7 @@ def remove_graph(g, test_id):
 
 
 #Generate the node features for the heterogeneous network.
-#ضمان مرونة النظام في استقبال الجرافات؛ حيث يمكن للدالة التعامل
-#  مع الجرافات سواء مُررت كعناصر منفصلة أو كقائمة مدمجة (List).
+#ضمان مرونة النظام في استقبال الجرافات؛ حيث يمكن للدالة التعامل مع الجرافات سواء مُررت كعناصر منفصلة أو كقائمة مدمجة (List).
 def generate_feat(args, g, g_llm=None):
     """توليد ميزات العقد النهائية"""
    
@@ -178,7 +173,7 @@ def generate_feat(args, g, g_llm=None):
     morgan_tensor = None  # تهيئة آمنة لتجنب NameError
 
     if args.dr_fingerprint:
-        morgan_path = f'../feat/{args.dataset}/Morgan_R3_2048_drug_emb.pkl'
+        morgan_path = f'../feat/{args.dataset}/Morgan_drug_emb.pkl'
         with open(morgan_path, 'rb') as f:
             morgan_data = pickle.load(f)
         
@@ -187,19 +182,19 @@ def generate_feat(args, g, g_llm=None):
         drug_info = pd.read_csv(f'../data/{args.dataset}/drug.csv')
         drug_list = drug_info['Drug'].values  # أسماء الأدوية بالترتيب الصحيح
         
-        fps = [] #بناء Feature Matrix مرتبة نبدا بقائمه فارغه
-        for d_id in drug_list:  #نمشي دواء دواء حسب ترتيب الجراف
+        fps = []
+        for d_id in drug_list:
             if d_id in morgan_data:
-                fps.append(morgan_data[d_id])  #اذا الدوا موجود نضيف ال fingerprint
+                fps.append(morgan_data[d_id])
             else:
                 # في حال عدم وجود الدواء نضع أصفاراً
-                fps.append(np.zeros(2048))
+                fps.append(np.zeros(1024))
         
-        fps = np.array(fps) #تحويل إلى NumPy  [num_drugs × 1024]
+        fps = np.array(fps)
         # ------------------------------------------
 
-        morgan_tensor = th.tensor(fps).to(th.float32).to(args.device) #للـ GPU.
-        dr_feat = th.cat([g.nodes['drug'].data['h'], morgan_tensor], dim=1) #دمج Morgan مع Features الجراف0
+        morgan_tensor = th.tensor(fps).to(th.float32).to(args.device)
+        dr_feat = th.cat([g.nodes['drug'].data['h'], morgan_tensor], dim=1)
     else:
         dr_feat = g.nodes['drug'].data['h']
 
@@ -264,7 +259,7 @@ def generate_feat(args, g, g_llm=None):
         # إذا كانت القيم None، نعطيها مصفوفة أصفار بنفس أبعاد ميزات الجراف
         # لكي يقرأ المودل الـ shape[1] بنجاح ولا ينهار
         if drug_LLM_emb is None:
-            drug_LLM_emb = th.zeros_like(dr_feat) #ضع أصفار بنفس حجم الـ graph features
+            drug_LLM_emb = th.zeros_like(dr_feat)
         if disease_LLM_emb is None:
             disease_LLM_emb = th.zeros_like(dis_feat)
 

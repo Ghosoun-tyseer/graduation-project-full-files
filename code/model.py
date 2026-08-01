@@ -5,10 +5,10 @@ import torch.nn as nn
 import dgl.nn as dglnn
 import dgl
 
-#تعريف طبقة ال decoder 
+
 class InnerProductDecoder(nn.Module):
     """Decoder model layer for link prediction."""
-# constructor يستدعي ال nn.Module
+
     def __init__(self, input_dim=None, dropout=0.4):
         super(InnerProductDecoder, self).__init__()
         self.dropout = nn.Dropout(dropout)
@@ -26,6 +26,37 @@ class InnerProductDecoder(nn.Module):
         R = self.weights_R(R)
         D = self.weights_D(D)
 
+        # ============================================================
+        # الخطأ السابق (Scalability - O(N×M) Full Matrix Materialization):
+        # -----------------------------------------------------------
+        # كان الكود يحسب دائماً مصفوفة الدرجات الكاملة باستخدام:
+        #   outputs = R @ D.T
+        # حيث R ∈ R^(N_drugs × d) و D ∈ R^(N_diseases × d).
+        # التعقيد الزمني والذاكري هو O(N_drugs × N_diseases).
+        # 
+        # المشكلة: عندما يكون عدد الأدوية كبيراً (مثلاً 10,000) وعدد 
+        # الأمراض كبير (مثلاً 5,000)، تصبح المصفوفة 10,000 × 5,000 
+        # أي 50 مليون قيمة (~200 ميغابايت في float32)، ويتضاعف ذلك 
+        # أثناء التمرير الخلفي (Backprop). هذا يستهلك ذاكرة GPU 
+        # بشكل مفرط ويبطئ التدريب، ويمنع تطبيق النموذج على أية قاعدة 
+        # بيانات متوسطة أو كبيرة.
+        # 
+        # الإصلاح: إضافة باراميترات اختيارية drug_idx و dis_idx 
+        # لحساب الدرجات فقط للأزواج المطلوبة (Edge-level Scoring). 
+        # التعقيد يصبح O(|E| × d) حيث |E| عدد الأزواج المُعاينة، 
+        # وهو أقل بكثير من N×M في البيانات النادرة (Sparse DDA).
+        # 
+        # إذا لم تُمرر الأزواج (None)، يُحسب المصفوفة الكاملة للتوافقية 
+        # مع الكود القديم، لكن يُفضل استخدام الوضع العيناتي.
+        # ============================================================
+        
+        # --- الكود القديم (محفوظ كتعليق) ---
+        """
+        outputs = R @ D.T
+        return outputs
+        """
+        
+        # --- الكود المصحح ---
         if drug_idx is not None and dis_idx is not None:
             # وضع العينة (Sampled Mode): O(|E|) memory/time
             # نأخذ التمثيلات المقابلة للأزواج المطلوبة فقط
@@ -135,7 +166,28 @@ class Model(nn.Module):
         self.predict = InnerProductDecoder(hidden_feats)
 
     def forward(self, g, x, drug_idx=None, dis_idx=None):
-       
+        # ============================================================
+        # الخطأ السابق (Scalability Propagation):
+        # -----------------------------------------------------------
+        # كانت الدالة forward لا تقبل أي فهارس للأزواج (Edge Indices)، 
+        # فكانت تُجبر الـ InnerProductDecoder دائماً على إنتاج المصفوفة 
+        # الكاملة N×M حتى لو كان سكربت التدريب يحتاج فقط لمجموعة فرعية 
+        # من الأزواج (مثلاً في Negative Sampling أو في التقييم على 
+        # حواف محددة).
+        # 
+        # الإصلاح: إضافة باراميترات اختيارية drug_idx و dis_idx إلى 
+        # forward() وتمريرها إلى الـ Decoder. هذا يُمكّن سكربت التدريب 
+        # (مثل main.py) من تمرير قائمة الأزواج المُعاينة فقط بدلاً من 
+        # طلب المصفوفة الكاملة.
+        # 
+        # ملاحظة: لتحقيق الاستفادة الكاملة من هذا الإصلاح، يجب تعديل 
+        # main.py ليستدعي:
+        #   score = model([g, g_llm], feature, drug_idx=train_drugs, dis_idx=train_diseases)
+        # بدلاً من:
+        #   score = model([g, g_llm], feature)
+        #   loss = criterion(score[mask_train]...)
+        # ============================================================
+        
         if isinstance(g, list):
             g_llm = g[1]
             g = g[0]
@@ -198,7 +250,10 @@ class Model(nn.Module):
             di_LLM_emb.append(h_llm['disease'])
             h_llm['drug'] = self.encoder_LLM_1(h_llm['drug'])
             h_llm['disease'] = self.encoder_LLM_1(h_llm['disease'])
-         
+              # خطا في استخدام h لاننا في برانش h_llm
+            # dr_LLM_emb.append(h['drug'])
+            # di_LLM_emb.append(h['disease'])
+            #تصحيح الخطا
             dr_LLM_emb.append(h_llm['drug'])
             di_LLM_emb.append(h_llm['disease'])
 
@@ -218,8 +273,23 @@ class Model(nn.Module):
         else:
             h['drug'] = dr_emb[-1]
             h['disease'] = di_emb[-1]
-       
-       
+        # ============================================================
+        # الخطأ السابق (Forced Full Matrix Prediction):
+        # -----------------------------------------------------------
+        # كانت الاستدعاء النهائي دائماً:
+        #   return self.predict(h)
+        # مما يُجبر الـ InnerProductDecoder على إنتاج مصفوفة كاملة 
+        # N_drugs × N_diseases بغض النظر عن احتياجات التدريب.
+        # 
+        # الإصلاح: تمرير فهارس الأزواج (إن وُجدت) إلى الـ Decoder.
+        # ============================================================
+        
+        # --- الكود القديم (محفوظ كتعليق) ---
+        """
+        return self.predict(h)
+        """
+        
+        # --- الكود المصحح ---
         return self.predict(h, drug_idx=drug_idx, dis_idx=dis_idx)
     
 

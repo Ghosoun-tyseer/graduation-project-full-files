@@ -13,7 +13,7 @@ from args import args
 
 
 def train():
-    set_seed(args.seed) #تثبيت العشوائية_Reproducibility
+    set_seed(args.seed)
     if not os.path.exists(args.saved_path):
         os.makedirs(args.saved_path)
     # if os.path.exists(os.path.join(args.saved_path, 'result.csv')):
@@ -23,7 +23,7 @@ def train():
     logger = logging.getLogger("my_logger")
     logger.setLevel(logging.INFO)
     define_logging(args, logger)
-    logger.info(args)   #ليتم حفظ كل النتائج داخل:logs.log
+    logger.info(args)
     
     if args.device_id:
         logger.info('Training on GPU')
@@ -36,69 +36,56 @@ def train():
     # load DDA data for Kfold splitting
     df = pd.read_csv('../data/{}/drug_dis.csv'.format(args.dataset),
                       header=None).values
-    data = np.array([[i, j, df[i, j]] for i in range(df.shape[0]) for j in range(df.shape[1])])#يحوّل المصفوفة إلى قائمة جديدة.
+    data = np.array([[i, j, df[i, j]] for i in range(df.shape[0]) for j in range(df.shape[1])])
     data = data.astype('int64')
-    data_pos = data[np.where(data[:, -1] == 1)[0]]  # جميع الصفوف و اخر عامود يعني عامود lable كامل 
-    data_neg = data[np.where(data[:, -1] == 0)[0]]  #فصل Positive و Negative
-    #[drug_id, disease_id, label]
-    #يتم عمل K-Fold للموجبة والسالبة بشكل منفصل.
+    data_pos = data[np.where(data[:, -1] == 1)[0]]
+    data_neg = data[np.where(data[:, -1] == 0)[0]]
     assert len(data) == len(data_pos) + len(data_neg)
 
     set_seed(args.seed)
-    kf = KFold(n_splits=args.nfold, shuffle=True,  #إنشاء KFold
+    kf = KFold(n_splits=args.nfold, shuffle=True, 
                          random_state=args.seed)
     fold = 1
-    pred_result = np.zeros(df.shape) #سيتم حفظ تنبؤات جميع الـ folds فيها.
+    pred_result = np.zeros(df.shape)
 
-    for (train_pos_idx, test_pos_idx), (train_neg_idx, test_neg_idx) in zip(kf.split(data_pos), #بدء Cross Validation
+    for (train_pos_idx, test_pos_idx), (train_neg_idx, test_neg_idx) in zip(kf.split(data_pos),
                                                                             kf.split(data_neg)):
         logger.info('{}-Cross Validation: Fold {}'.format(args.nfold, fold))
         
         # get the index list for train and test set
-        #استخراج عينات التدريب والاختبار
-       #idx هي مواقع الصفوف التي اختارها KFold،
-       #id فهي البيانات الفعلية الموجودة في تلك الصفوف
-       #tuple = قائمة لكن غير قابلة للتغيير (immutable)
-        train_pos_id, test_pos_id = data_pos[train_pos_idx], data_pos[test_pos_idx] #[drug_id, disease_id, label]
+        train_pos_id, test_pos_id = data_pos[train_pos_idx], data_pos[test_pos_idx]
         train_neg_id, test_neg_id = data_neg[train_neg_idx], data_neg[test_neg_idx]
-        train_pos_idx = [tuple(train_pos_id[:, 0]), tuple(train_pos_id[:, 1])]#كل الصفوف من العامود الاول وكل الصفوف من العامود الثاني 
-        test_pos_idx = [tuple(test_pos_id[:, 0]), tuple(test_pos_id[:, 1])]   #
+        train_pos_idx = [tuple(train_pos_id[:, 0]), tuple(train_pos_id[:, 1])]
+        test_pos_idx = [tuple(test_pos_id[:, 0]), tuple(test_pos_id[:, 1])]
         train_neg_idx = [tuple(train_neg_id[:, 0]), tuple(train_neg_id[:, 1])]
         test_neg_idx = [tuple(test_neg_id[:, 0]), tuple(test_neg_id[:, 1])]
-        assert len(test_pos_idx[0]) + len(test_neg_idx[0]) + len(train_pos_idx[0]) + len(train_neg_idx[0]) == len(data) #التأكد أنه لم يتم فقد أي sample ولا يوجد تكرار و التقسيم صحيح 100%
+        assert len(test_pos_idx[0]) + len(test_neg_idx[0]) + len(train_pos_idx[0]) + len(train_neg_idx[0]) == len(data)
         
-        g = load_dataset(args)  #يتم تحميل الـ graph 
+        g = load_dataset(args)
         logger.info(g)
         # remove test set DDA from train graph
-        g, g_llm = g[0], g[1] #فصل نوعين من الجراف
+        g, g_llm = g[0], g[1]
         g = remove_graph(g, test_pos_id).to(args.device)
-        g_llm = remove_graph(g_llm, test_pos_id).to(args.device) #إزالة بيانات الاختبار من الجراف
+        g_llm = remove_graph(g_llm, test_pos_id).to(args.device)
         
         # generate features based on model type
         feature = generate_feat(args, [g, g_llm])    
 
         # get the mask list for train and test set that used for performance calculation
-        mask_label = np.ones(df.shape)  #بناء mask للتدريب والاختبار
-        #إنشاء matrix بنفس حجم adjacency matrix (df):
-         #1  = train samples
-        #0 = test samples
-        #استبعاد عينات الاختبار
+        mask_label = np.ones(df.shape)
         mask_label[test_pos_idx[0], test_pos_idx[1]] = 0
         mask_label[test_neg_idx[0], test_neg_idx[1]] = 0
-        mask_test = np.where(mask_label == 0) #استخراج test mask
-        mask_test = [tuple(mask_test[0]), tuple(mask_test[1])]  #قائمة إحداثيات (drug_id, disease_id) الخاصة بالـ test set.
+        mask_test = np.where(mask_label == 0)
+        mask_test = [tuple(mask_test[0]), tuple(mask_test[1])]
         mask_train = np.where(mask_label == 1)
         mask_train = [tuple(mask_train[0]), tuple(mask_train[1])]
 
-        
-        #للتحقق من التوزيع
         logger.info('Number of total training samples: {}, pos samples: {}, neg samples: {}'.format(len(mask_train[0]),
                                                                                               len(train_pos_idx[0]),
                                                                                               len(train_neg_idx[0])))
         logger.info('Number of total testing samples: {}, pos samples: {}, neg samples: {}'.format(len(mask_test[0]),
                                                                                              len(test_pos_idx[0]),
                                                                                              len(test_neg_idx[0])))
-        #test mask = positive test + negative test 
         assert len(mask_test[0]) == len(test_neg_idx[0]) + len(test_pos_idx[0])
         label = th.tensor(df).float().to(args.device)
         
